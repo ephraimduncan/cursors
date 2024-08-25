@@ -11,6 +11,7 @@ function App() {
 	}>({});
 	const [isConnected, setIsConnected] = useState(false);
 	const socketRef = useRef<WebSocket | null>(null);
+	const localClientIdRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		const connectWebSocket = () => {
@@ -25,10 +26,12 @@ function App() {
 
 			socket.onmessage = (event) => {
 				const data = JSON.parse(event.data);
-				setCursors((prevCursors) => ({
-					...prevCursors,
-					[data.clientId]: { x: data.x, y: data.y },
-				}));
+				if (data.clientId !== localClientIdRef.current) {
+					setCursors((prevCursors) => ({
+						...prevCursors,
+						[data.clientId]: { x: data.x, y: data.y },
+					}));
+				}
 			};
 
 			socket.onerror = (error) => {
@@ -58,10 +61,14 @@ function App() {
 	const handleMouseMove = useCallback(
 		(event: React.MouseEvent) => {
 			const { clientX, clientY } = event;
-			console.log("Sending", { x: clientX, y: clientY });
 
 			if (isConnected && socketRef.current) {
-				socketRef.current.send(JSON.stringify({ x: clientX, y: clientY }));
+				socketRef.current.send(
+					JSON.stringify({
+						x: clientX,
+						y: clientY,
+					}),
+				);
 			}
 		},
 		[isConnected],
@@ -73,28 +80,34 @@ function App() {
 		}
 	}, [retryCount]);
 
+	console.log(cursors);
+
 	return (
-		<div className="App" onMouseMove={handleMouseMove}>
-			<h1>Cursor App</h1>
+		<div
+			className="App"
+			onMouseMove={handleMouseMove}
+			style={{ width: "100vw", height: "100vh" }}
+		>
+			<h1>cursedddd</h1>
 			<div>{isConnected ? "Connected" : "Disconnected"}</div>
-			<div className="cursor-container">
-				{Object.entries(cursors).map(([clientId, position]) => (
-					<div
-						key={clientId}
-						className="mouse-cursor"
-						style={{
-							position: "absolute",
-							left: `${position.x}px`,
-							top: `${position.y}px`,
-							width: "20px",
-							height: "20px",
-							borderRadius: "50%",
-							backgroundColor: "red",
-							pointerEvents: "none",
-						}}
-					/>
-				))}
-			</div>
+			{Object.entries(cursors).map(([clientId, position]) => (
+				<div
+					key={clientId}
+					className="remote-cursor"
+					style={{
+						position: "fixed",
+						left: 0,
+						top: 0,
+						transform: `translate(${position.x}px, ${position.y}px)`,
+						width: "20px",
+						height: "20px",
+						borderRadius: "50%",
+						backgroundColor: "red",
+						pointerEvents: "none",
+						zIndex: 9998,
+					}}
+				/>
+			))}
 		</div>
 	);
 }

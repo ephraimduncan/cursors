@@ -169,8 +169,8 @@ func main() {
 		handleWebSocket(hub, w, r)
 	})
 
-	log.Println("Server starting on :8080")
-	err := http.ListenAndServe(":8080", nil)
+	log.Println("Server starting on :4000")
+	err := http.ListenAndServe(":4000", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
