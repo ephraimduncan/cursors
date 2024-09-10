@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -21,6 +22,7 @@ type MousePosition struct {
 	ClientID string  `json:"clientId"`
 	X        float64 `json:"x"`
 	Y        float64 `json:"y"`
+	Color    string  `json:"color"`
 }
 
 type Hub struct {
@@ -132,6 +134,9 @@ func (c *Client) readPump() {
 		}
 
 		mousePos.ClientID = c.clientID
+
+		log.Printf("Received mouse position: %+v", mousePos)
+
 		c.hub.mutex.Lock()
 		c.hub.mousePositions[c.clientID] = mousePos
 		c.hub.mutex.Unlock()
@@ -180,7 +185,7 @@ func handleWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := conn.RemoteAddr().String()
+	clientID := uuid.New().String()
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), clientID: clientID}
 	client.hub.register <- client
 
