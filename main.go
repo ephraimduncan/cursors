@@ -11,9 +11,10 @@ import (
 )
 
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
+	hub      *Hub
+	conn     *websocket.Conn
+	send     chan []byte
+	clientID string
 }
 
 type MousePosition struct {
@@ -23,19 +24,23 @@ type MousePosition struct {
 }
 
 type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-	mutex      sync.Mutex
+	clients         map[*Client]bool
+	mousePositions  map[string]MousePosition
+	broadcast       chan []byte
+	register        chan *Client
+	unregister      chan *Client
+	mutex           sync.Mutex
+	positionUpdated chan struct{}
 }
 
 func newHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
+		clients:         make(map[*Client]bool),
+		mousePositions:  make(map[string]MousePosition),
+		broadcast:       make(chan []byte),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		positionUpdated: make(chan struct{}),
 	}
 }
 
@@ -46,26 +51,53 @@ func (h *Hub) run() {
 			h.mutex.Lock()
 			h.clients[client] = true
 			h.mutex.Unlock()
+			h.broadcastAllPositions()
 		case client := <-h.unregister:
 			h.mutex.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
+				delete(h.mousePositions, client.clientID)
 				close(client.send)
 			}
 			h.mutex.Unlock()
+			h.broadcastAllPositions()
 		case message := <-h.broadcast:
-			h.mutex.Lock()
-			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients, client)
-				}
-			}
-			h.mutex.Unlock()
+			h.broadcastMessage(message)
+		case <-h.positionUpdated:
+			h.broadcastAllPositions()
 		}
 	}
+}
+
+func (h *Hub) broadcastMessage(message []byte) {
+	h.mutex.Lock()
+	for client := range h.clients {
+		select {
+		case client.send <- message:
+		default:
+			close(client.send)
+			delete(h.clients, client)
+			delete(h.mousePositions, client.clientID)
+		}
+	}
+	h.mutex.Unlock()
+}
+
+func (h *Hub) broadcastAllPositions() {
+	h.mutex.Lock()
+	positions := make([]MousePosition, 0, len(h.mousePositions))
+	for _, pos := range h.mousePositions {
+		positions = append(positions, pos)
+	}
+	h.mutex.Unlock()
+
+	message, err := json.Marshal(positions)
+	if err != nil {
+		log.Printf("error marshaling positions: %v", err)
+		return
+	}
+
+	h.broadcastMessage(message)
 }
 
 var upgrader = websocket.Upgrader{
@@ -93,17 +125,17 @@ func (c *Client) readPump() {
 			break
 		}
 
-		log.Printf("Received raw message: %s", string(message))
-
 		var mousePos MousePosition
 		if err := json.Unmarshal(message, &mousePos); err != nil {
 			log.Printf("error unmarshaling message: %v", err)
 			continue
 		}
 
-		mousePos.ClientID = c.conn.RemoteAddr().String()
-		updatedMessage, _ := json.Marshal(mousePos)
-		c.hub.broadcast <- updatedMessage
+		mousePos.ClientID = c.clientID
+		c.hub.mutex.Lock()
+		c.hub.mousePositions[c.clientID] = mousePos
+		c.hub.mutex.Unlock()
+		c.hub.positionUpdated <- struct{}{}
 	}
 }
 
@@ -129,12 +161,6 @@ func (c *Client) writePump() {
 			}
 			w.Write(message)
 
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
-			}
-
 			if err := w.Close(); err != nil {
 				return
 			}
@@ -154,7 +180,8 @@ func handleWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	clientID := conn.RemoteAddr().String()
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), clientID: clientID}
 	client.hub.register <- client
 
 	go client.writePump()

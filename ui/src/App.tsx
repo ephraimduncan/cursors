@@ -1,17 +1,20 @@
 import type React from "react";
 import { useState, useEffect, useCallback, useRef } from "react";
 
-const WS_URL = "ws://localhost:4000/ws";
+const WS_URL = "ws://192.168.8.101:4000/ws";
 const MAX_RETRIES = 5;
+
+interface CursorPosition {
+	clientId: string;
+	x: number;
+	y: number;
+}
 
 function App() {
 	const [retryCount, setRetryCount] = useState(0);
-	const [cursors, setCursors] = useState<{
-		[clientId: string]: { x: number; y: number };
-	}>({});
+	const [cursors, setCursors] = useState<CursorPosition[]>([]);
 	const [isConnected, setIsConnected] = useState(false);
 	const socketRef = useRef<WebSocket | null>(null);
-	const localClientIdRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		const connectWebSocket = () => {
@@ -26,11 +29,8 @@ function App() {
 
 			socket.onmessage = (event) => {
 				const data = JSON.parse(event.data);
-				if (data.clientId !== localClientIdRef.current) {
-					setCursors((prevCursors) => ({
-						...prevCursors,
-						[data.clientId]: { x: data.x, y: data.y },
-					}));
+				if (Array.isArray(data)) {
+					setCursors(data);
 				}
 			};
 
@@ -88,17 +88,17 @@ function App() {
 			onMouseMove={handleMouseMove}
 			style={{ width: "100vw", height: "100vh" }}
 		>
-			<h1>cursedddd</h1>
+			<h1>Cursor Tracking</h1>
 			<div>{isConnected ? "Connected" : "Disconnected"}</div>
-			{Object.entries(cursors).map(([clientId, position]) => (
+			{cursors.map((cursor) => (
 				<div
-					key={clientId}
+					key={cursor.clientId}
 					className="remote-cursor"
 					style={{
 						position: "fixed",
 						left: 0,
 						top: 0,
-						transform: `translate(${position.x}px, ${position.y}px)`,
+						transform: `translate(${cursor.x}px, ${cursor.y}px)`,
 						width: "20px",
 						height: "20px",
 						borderRadius: "50%",
